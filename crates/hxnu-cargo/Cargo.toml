@@ -6,3 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+hxnu-target-spec = { path = "../hxnu-target-spec" }
+
+[dev-dependencies]
+tempfile.workspace = true
