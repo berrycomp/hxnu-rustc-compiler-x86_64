@@ -12,3 +12,11 @@ Design goals:
 - Keep target identity fixed as `x86_64-unknown-hxnu`.
 - Keep repository independent from kernel source tree.
 - Keep SDK layout stable for CI/automation consumption.
+
+SDK layout contract:
+
+- `bin/`: `hxnu-rustc`, `hxnu-cargo`
+- `targets/`: `x86_64-unknown-hxnu.json`
+- `sysroot/lib/rustlib/x86_64-unknown-hxnu/lib`: `core`, `alloc`, `compiler_builtins`
+- `examples/`: `no_std-hello`, `init-like`
+- `docs/`: consumer-facing usage and integration notes

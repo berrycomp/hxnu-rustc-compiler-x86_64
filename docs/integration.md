@@ -1,10 +1,31 @@
 # HXNU Consumer Contract
 
-This toolchain is consumed from external repositories (for example the HXNU kernel repo).
+This toolchain is consumed from external repositories (for example the HXNU kernel repo) without converting to monorepo.
 
-Contract:
+## Integration Steps
 
-1. Add SDK `bin/` to `PATH`.
-2. Invoke `hxnu-cargo build` in consumer repository.
-3. Toolchain injects `x86_64-unknown-hxnu` target defaults when missing.
-4. Artifact class remains ELF64 x86_64 freestanding outputs.
+1. Install SDK bundle:
+   - `hxnu-sdk bundle install --prefix /opt/hxnu-sdk` (or any local prefix)
+2. Export SDK binaries:
+   - `export PATH="/opt/hxnu-sdk/hxnu-rustc-compiler-x86_64-0.1.0/bin:$PATH"`
+3. Build consumer crate with wrapper:
+   - `hxnu-cargo build --release`
+
+## Runtime Contract
+
+- Fixed target: `x86_64-unknown-hxnu`
+- `hxnu-cargo` sets:
+  - `RUSTC=hxnu-rustc`
+  - `RUST_TARGET_PATH` to include bundled `targets/`
+  - `RUSTFLAGS` to include `-C panic=abort`
+  - `-Z build-std=core,alloc,compiler_builtins` for compile-like commands
+- `hxnu-rustc` enforces:
+  - target default when missing
+  - custom target compatibility (`-Z unstable-options`)
+  - no-std-compatible panic strategy (`panic=abort`)
+
+## Acceptance Baseline
+
+- Kernel or userspace consumer builds with `hxnu-cargo` without modifying the kernel compiler internals.
+- Produced artifacts stay in ELF64 little-endian x86_64 class.
+- Program headers contain `PT_LOAD` segments for HXNU loader compatibility.
