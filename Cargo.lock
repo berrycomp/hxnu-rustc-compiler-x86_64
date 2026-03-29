@@ -271,10 +271,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "init-like"
-version = "0.1.0"
-
-[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -337,10 +333,6 @@ dependencies = [
  "adler2",
  "simd-adler32",
 ]
-
-[[package]]
-name = "no-std-hello"
-version = "0.1.0"
 
 [[package]]
 name = "once_cell"
