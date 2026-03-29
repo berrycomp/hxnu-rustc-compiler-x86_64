@@ -4,6 +4,8 @@ members = [
   "crates/hxnu-cargo",
   "crates/hxnu-sdk",
   "crates/hxnu-target-spec",
+  "examples/no_std-hello",
+  "examples/init-like",
 ]
 resolver = "2"
 

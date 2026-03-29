@@ -6,3 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+clap.workspace = true
+flate2.workspace = true
+tar.workspace = true
+hxnu-target-spec = { path = "../hxnu-target-spec" }

@@ -5,7 +5,8 @@ extern crate rustc_driver;
 use anyhow::{Context, Result};
 use hxnu_target_spec::{
     discover_targets_dir_from_exe, ensure_panic_abort_codegen, ensure_target_arg,
-    load_and_validate_target_spec, merged_rust_target_path, target_json_path,
+    ensure_unstable_options_flag, load_and_validate_target_spec, merged_rust_target_path,
+    has_target_arg, is_host_side_compilation, should_inject_rustc_defaults, target_json_path,
 };
 use std::env;
 use std::process::ExitCode;
@@ -33,8 +34,14 @@ fn run() -> Result<()> {
     env::set_var("RUST_TARGET_PATH", merged);
 
     let mut rustc_args: Vec<String> = env::args().collect();
-    ensure_target_arg(&mut rustc_args);
-    ensure_panic_abort_codegen(&mut rustc_args);
+    let should_inject_defaults = should_inject_rustc_defaults(&rustc_args);
+    if should_inject_defaults && !is_host_side_compilation(&rustc_args) {
+        ensure_target_arg(&mut rustc_args);
+        ensure_panic_abort_codegen(&mut rustc_args);
+    }
+    if should_inject_defaults && has_target_arg(&rustc_args) {
+        ensure_unstable_options_flag(&mut rustc_args);
+    }
 
     let mut callbacks = DriverCallbacks;
     let exit_code = rustc_driver::catch_with_exit_code(|| {

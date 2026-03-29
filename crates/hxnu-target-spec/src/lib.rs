@@ -10,6 +10,7 @@ pub const BUILD_STD_COMPONENTS: &str = "core,alloc,compiler_builtins";
 pub const BUILD_STD_FLAG: &str = "-Z";
 pub const BUILD_STD_VALUE: &str = "build-std=core,alloc,compiler_builtins";
 pub const PANIC_ABORT: &str = "panic=abort";
+pub const UNSTABLE_OPTIONS: &str = "unstable-options";
 
 #[derive(Debug, Clone)]
 pub struct TargetSpecSummary {
@@ -28,8 +29,24 @@ struct RawTargetSpec {
     #[serde(rename = "target-endian")]
     target_endian: String,
     #[serde(rename = "target-pointer-width")]
-    target_pointer_width: String,
+    target_pointer_width: PointerWidth,
     linker: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PointerWidth {
+    Number(u16),
+    Text(String),
+}
+
+impl PointerWidth {
+    fn as_string(&self) -> String {
+        match self {
+            Self::Number(value) => value.to_string(),
+            Self::Text(value) => value.clone(),
+        }
+    }
 }
 
 pub fn has_target_arg(args: &[String]) -> bool {
@@ -84,6 +101,34 @@ pub fn ensure_panic_abort_codegen(args: &mut Vec<String>) {
 
     args.push("-C".to_string());
     args.push(PANIC_ABORT.to_string());
+}
+
+pub fn has_unstable_options_flag(args: &[String]) -> bool {
+    let mut iter = args.iter().peekable();
+    while let Some(arg) = iter.next() {
+        if arg == "-Z" {
+            if iter
+                .peek()
+                .is_some_and(|value| value.as_str() == UNSTABLE_OPTIONS)
+            {
+                return true;
+            }
+            continue;
+        }
+        if arg == "-Zunstable-options" {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn ensure_unstable_options_flag(args: &mut Vec<String>) {
+    if has_unstable_options_flag(args) {
+        return;
+    }
+
+    args.push("-Z".to_string());
+    args.push(UNSTABLE_OPTIONS.to_string());
 }
 
 pub fn has_build_std_flag(args: &[String]) -> bool {
@@ -168,10 +213,11 @@ pub fn load_and_validate_target_spec(path: &Path) -> Result<TargetSpecSummary> {
             spec.llvm_target
         );
     }
-    if spec.target_pointer_width != "64" {
+    let pointer_width = spec.target_pointer_width.as_string();
+    if pointer_width != "64" {
         bail!(
             "invalid target-pointer-width {}, expected 64",
-            spec.target_pointer_width
+            pointer_width
         );
     }
     if spec.target_endian != "little" {
@@ -182,9 +228,63 @@ pub fn load_and_validate_target_spec(path: &Path) -> Result<TargetSpecSummary> {
         arch: spec.arch,
         llvm_target: spec.llvm_target,
         target_endian: spec.target_endian,
-        target_pointer_width: spec.target_pointer_width,
+        target_pointer_width: pointer_width,
         linker: spec.linker,
     })
+}
+
+pub fn should_inject_rustc_defaults(args: &[String]) -> bool {
+    !args.iter().any(|arg| {
+        matches!(
+            arg.as_str(),
+            "-V"
+                | "--version"
+                | "-vV"
+                | "-h"
+                | "--help"
+                | "--print"
+                | "--explain"
+                | "-Whelp"
+                | "-Chelp"
+                | "-Zhelp"
+        )
+    })
+}
+
+pub fn is_host_side_compilation(args: &[String]) -> bool {
+    let mut has_print_query = false;
+    let mut total_crate_type_count = 0usize;
+    let mut proc_macro_crate_type_count = 0usize;
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--print" || args[index].starts_with("--print=") {
+            has_print_query = true;
+        }
+        if args[index] == "--crate-name"
+            && args
+                .get(index + 1)
+                .is_some_and(|value| value.as_str() == "build_script_build")
+        {
+            return true;
+        }
+        if args[index] == "--crate-type"
+            && args.get(index + 1).is_some()
+        {
+            total_crate_type_count += 1;
+            if args[index + 1] == "proc-macro" {
+                proc_macro_crate_type_count += 1;
+            }
+            index += 1;
+        } else if let Some(crate_type) = args[index].strip_prefix("--crate-type=") {
+            total_crate_type_count += 1;
+            if crate_type == "proc-macro" {
+                proc_macro_crate_type_count += 1;
+            }
+        }
+        index += 1;
+    }
+
+    !has_print_query && total_crate_type_count > 0 && proc_macro_crate_type_count == total_crate_type_count
 }
 
 #[cfg(test)]
@@ -241,5 +341,45 @@ mod tests {
         let summary = load_and_validate_target_spec(&path).expect("valid spec");
         assert_eq!(summary.arch, "x86_64");
         assert_eq!(summary.target_pointer_width, "64");
+    }
+
+    #[test]
+    fn skips_injection_for_version_query() {
+        let args = vec!["rustc".to_string(), "-vV".to_string()];
+        assert!(!should_inject_rustc_defaults(&args));
+    }
+
+    #[test]
+    fn detects_host_build_script() {
+        let args = vec![
+            "rustc".to_string(),
+            "--crate-name".to_string(),
+            "build_script_build".to_string(),
+        ];
+        assert!(is_host_side_compilation(&args));
+    }
+
+    #[test]
+    fn detects_host_proc_macro_compile() {
+        let args = vec![
+            "rustc".to_string(),
+            "--crate-type".to_string(),
+            "proc-macro".to_string(),
+        ];
+        assert!(is_host_side_compilation(&args));
+    }
+
+    #[test]
+    fn ignores_probe_with_proc_macro_crate_type() {
+        let args = vec![
+            "rustc".to_string(),
+            "-".to_string(),
+            "--print=file-names".to_string(),
+            "--crate-type".to_string(),
+            "bin".to_string(),
+            "--crate-type".to_string(),
+            "proc-macro".to_string(),
+        ];
+        assert!(!is_host_side_compilation(&args));
     }
 }
