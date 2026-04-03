@@ -13,7 +13,12 @@ This toolchain is consumed from external repositories (for example the HXNU kern
 
 ## Runtime Contract
 
-- Fixed target: `x86_64-unknown-hxnu`
+- Default target: `x86_64-unknown-hxnu`
+- Supported explicit targets:
+  - `x86_64-unknown-hxnu`
+  - `aarch64-unknown-hxnu`
+  - `powerpc64le-unknown-hxnu`
+  - `powerpc64-unknown-hxnu`
 - `hxnu-cargo` sets:
   - `RUSTC=hxnu-rustc`
   - `RUST_TARGET_PATH` to include bundled `targets/`
@@ -27,5 +32,5 @@ This toolchain is consumed from external repositories (for example the HXNU kern
 ## Acceptance Baseline
 
 - Kernel or userspace consumer builds with `hxnu-cargo` without modifying the kernel compiler internals.
-- Produced artifacts stay in ELF64 little-endian x86_64 class.
+- Produced artifacts stay in ELF64 class with target-expected machine/endian pairing.
 - Program headers contain `PT_LOAD` segments for HXNU loader compatibility.

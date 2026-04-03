@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 <artifact>" >&2
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+  echo "usage: $0 <artifact> [machine-substring] [endian-substring]" >&2
   exit 1
 fi
 
 ARTIFACT="$1"
+EXPECTED_MACHINE="${2:-x86-64}"
+EXPECTED_ENDIAN="${3:-LSB}"
 if [[ ! -f "$ARTIFACT" ]]; then
   echo "artifact not found: $ARTIFACT" >&2
   exit 1
@@ -26,8 +28,12 @@ if [[ "$FILE_OUTPUT" != *"ELF 64-bit"* ]]; then
   echo "artifact is not ELF64: $FILE_OUTPUT" >&2
   exit 1
 fi
-if [[ "$FILE_OUTPUT" != *"x86-64"* ]]; then
-  echo "artifact machine is not x86-64: $FILE_OUTPUT" >&2
+if [[ "$FILE_OUTPUT" != *"$EXPECTED_ENDIAN"* ]]; then
+  echo "artifact endian mismatch ($EXPECTED_ENDIAN): $FILE_OUTPUT" >&2
+  exit 1
+fi
+if [[ "$FILE_OUTPUT" != *"$EXPECTED_MACHINE"* ]]; then
+  echo "artifact machine mismatch ($EXPECTED_MACHINE): $FILE_OUTPUT" >&2
   exit 1
 fi
 
@@ -37,4 +43,4 @@ if ! grep -qE '^[[:space:]]+LOAD[[:space:]]' <<<"$PROGRAM_HEADERS"; then
   exit 1
 fi
 
-echo "verified ELF artifact: $ARTIFACT"
+echo "verified ELF artifact: $ARTIFACT ($EXPECTED_MACHINE, $EXPECTED_ENDIAN)"

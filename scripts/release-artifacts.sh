@@ -27,16 +27,35 @@ fi
 NO_STD_TARGET_DIR="$TEMP_PREFIX/no-std-build"
 INIT_TARGET_DIR="$TEMP_PREFIX/init-build"
 
-"$SDK_ROOT/bin/hxnu-cargo" build \
-  --manifest-path "$SDK_ROOT/examples/no_std-hello/Cargo.toml" \
-  --release \
-  --target-dir "$NO_STD_TARGET_DIR"
-"$VERIFY_ELF" "$NO_STD_TARGET_DIR/x86_64-unknown-hxnu/release/no-std-hello"
+TARGETS=(
+  "x86_64-unknown-hxnu|x86-64|LSB"
+  "aarch64-unknown-hxnu|aarch64|LSB"
+  "powerpc64le-unknown-hxnu|PowerPC|LSB"
+  "powerpc64-unknown-hxnu|PowerPC|MSB"
+)
 
-"$SDK_ROOT/bin/hxnu-cargo" build \
-  --manifest-path "$SDK_ROOT/examples/init-like/Cargo.toml" \
-  --release \
-  --target-dir "$INIT_TARGET_DIR"
-"$VERIFY_ELF" "$INIT_TARGET_DIR/x86_64-unknown-hxnu/release/init-like"
+for spec in "${TARGETS[@]}"; do
+  IFS='|' read -r TARGET_TRIPLE EXPECTED_MACHINE EXPECTED_ENDIAN <<<"$spec"
+
+  "$SDK_ROOT/bin/hxnu-cargo" build \
+    --manifest-path "$SDK_ROOT/examples/no_std-hello/Cargo.toml" \
+    --release \
+    --target "$TARGET_TRIPLE" \
+    --target-dir "$NO_STD_TARGET_DIR"
+  "$VERIFY_ELF" \
+    "$NO_STD_TARGET_DIR/$TARGET_TRIPLE/release/no-std-hello" \
+    "$EXPECTED_MACHINE" \
+    "$EXPECTED_ENDIAN"
+
+  "$SDK_ROOT/bin/hxnu-cargo" build \
+    --manifest-path "$SDK_ROOT/examples/init-like/Cargo.toml" \
+    --release \
+    --target "$TARGET_TRIPLE" \
+    --target-dir "$INIT_TARGET_DIR"
+  "$VERIFY_ELF" \
+    "$INIT_TARGET_DIR/$TARGET_TRIPLE/release/init-like" \
+    "$EXPECTED_MACHINE" \
+    "$EXPECTED_ENDIAN"
+done
 
 echo "release artifact flow completed successfully"

@@ -9,14 +9,14 @@ HXNU compiler workspace is split into four crates:
 
 Design goals:
 
-- Keep target identity fixed as `x86_64-unknown-hxnu`.
+- Keep default target identity as `x86_64-unknown-hxnu` while supporting multiple HXNU targets.
 - Keep repository independent from kernel source tree.
 - Keep SDK layout stable for CI/automation consumption.
 
 SDK layout contract:
 
 - `bin/`: `hxnu-rustc`, `hxnu-cargo`
-- `targets/`: `x86_64-unknown-hxnu.json`
-- `sysroot/lib/rustlib/x86_64-unknown-hxnu/lib`: `core`, `alloc`, `compiler_builtins`
+- `targets/`: one JSON spec per target (`x86_64`, `aarch64`, `powerpc64le`, `powerpc64`)
+- `sysroot/lib/rustlib/<triple>/lib`: prebuilt `core`, `alloc`, `compiler_builtins` per target
 - `examples/`: `no_std-hello`, `init-like`
 - `docs/`: consumer-facing usage and integration notes

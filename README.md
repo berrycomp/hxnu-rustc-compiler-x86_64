@@ -1,10 +1,15 @@
-# HXNU Rust Compiler (x86_64)
+# HXNU Rust Compiler (Multi-Target)
 
 Rust-first compiler/toolchain workspace for HXNU.
 
 ## Scope
 
-- Fixed target identity: `x86_64-unknown-hxnu`
+- Default target identity: `x86_64-unknown-hxnu`
+- Supported targets:
+  - `x86_64-unknown-hxnu`
+  - `aarch64-unknown-hxnu`
+  - `powerpc64le-unknown-hxnu`
+  - `powerpc64-unknown-hxnu`
 - `hxnu-rustc`: `rustc_driver`-based frontend
 - `hxnu-cargo`: Cargo wrapper with default target and `build-std` contract
 - `hxnu-sdk`: SDK bundle build/pack/install workflow

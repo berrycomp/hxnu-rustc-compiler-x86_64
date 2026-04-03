@@ -4,16 +4,87 @@ use std::env;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-pub const TARGET_TRIPLE: &str = "x86_64-unknown-hxnu";
-pub const TARGET_JSON_FILENAME: &str = "x86_64-unknown-hxnu.json";
+pub const TARGET_TRIPLE_X86_64: &str = "x86_64-unknown-hxnu";
+pub const TARGET_TRIPLE_AARCH64: &str = "aarch64-unknown-hxnu";
+pub const TARGET_TRIPLE_POWERPC64LE: &str = "powerpc64le-unknown-hxnu";
+pub const TARGET_TRIPLE_POWERPC64: &str = "powerpc64-unknown-hxnu";
+
+pub const TARGET_JSON_X86_64: &str = "x86_64-unknown-hxnu.json";
+pub const TARGET_JSON_AARCH64: &str = "aarch64-unknown-hxnu.json";
+pub const TARGET_JSON_POWERPC64LE: &str = "powerpc64le-unknown-hxnu.json";
+pub const TARGET_JSON_POWERPC64: &str = "powerpc64-unknown-hxnu.json";
+
+pub const TARGET_TRIPLE: &str = TARGET_TRIPLE_X86_64;
+pub const TARGET_JSON_FILENAME: &str = TARGET_JSON_X86_64;
+
 pub const BUILD_STD_COMPONENTS: &str = "core,alloc,compiler_builtins";
 pub const BUILD_STD_FLAG: &str = "-Z";
 pub const BUILD_STD_VALUE: &str = "build-std=core,alloc,compiler_builtins";
 pub const PANIC_ABORT: &str = "panic=abort";
 pub const UNSTABLE_OPTIONS: &str = "unstable-options";
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum TargetId {
+    X86_64,
+    Aarch64,
+    Powerpc64Le,
+    Powerpc64,
+}
+
+impl TargetId {
+    pub const fn as_triple(self) -> &'static str {
+        match self {
+            Self::X86_64 => TARGET_TRIPLE_X86_64,
+            Self::Aarch64 => TARGET_TRIPLE_AARCH64,
+            Self::Powerpc64Le => TARGET_TRIPLE_POWERPC64LE,
+            Self::Powerpc64 => TARGET_TRIPLE_POWERPC64,
+        }
+    }
+
+    pub const fn json_filename(self) -> &'static str {
+        match self {
+            Self::X86_64 => TARGET_JSON_X86_64,
+            Self::Aarch64 => TARGET_JSON_AARCH64,
+            Self::Powerpc64Le => TARGET_JSON_POWERPC64LE,
+            Self::Powerpc64 => TARGET_JSON_POWERPC64,
+        }
+    }
+
+    pub const fn expected_arch(self) -> &'static str {
+        match self {
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+            Self::Powerpc64Le | Self::Powerpc64 => "powerpc64",
+        }
+    }
+
+    pub const fn expected_endian(self) -> &'static str {
+        match self {
+            Self::X86_64 | Self::Aarch64 | Self::Powerpc64Le => "little",
+            Self::Powerpc64 => "big",
+        }
+    }
+
+    pub const fn expected_llvm_prefix(self) -> &'static str {
+        match self {
+            Self::X86_64 => "x86_64",
+            Self::Aarch64 => "aarch64",
+            Self::Powerpc64Le => "powerpc64le",
+            Self::Powerpc64 => "powerpc64",
+        }
+    }
+}
+
+pub const SUPPORTED_TARGETS: [TargetId; 4] = [
+    TargetId::X86_64,
+    TargetId::Aarch64,
+    TargetId::Powerpc64Le,
+    TargetId::Powerpc64,
+];
+
 #[derive(Debug, Clone)]
 pub struct TargetSpecSummary {
+    pub target_id: Option<TargetId>,
     pub arch: String,
     pub llvm_target: String,
     pub target_endian: String,
@@ -49,17 +120,50 @@ impl PointerWidth {
     }
 }
 
-pub fn has_target_arg(args: &[String]) -> bool {
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
+pub fn default_target_id() -> TargetId {
+    TargetId::X86_64
+}
+
+pub fn supported_targets() -> &'static [TargetId] {
+    &SUPPORTED_TARGETS
+}
+
+pub fn target_id_from_triple(triple: &str) -> Option<TargetId> {
+    SUPPORTED_TARGETS
+        .iter()
+        .copied()
+        .find(|target| target.as_triple() == triple)
+}
+
+pub fn target_json_filename_for_triple(triple: &str) -> Option<&'static str> {
+    target_id_from_triple(triple).map(TargetId::json_filename)
+}
+
+pub fn extract_target_arg(args: &[String]) -> Option<&str> {
+    let mut index = 0usize;
+    while index < args.len() {
+        let arg = args[index].as_str();
         if arg == "--target" {
-            return iter.next().is_some();
+            return args.get(index + 1).map(String::as_str);
         }
-        if arg.starts_with("--target=") {
-            return true;
+        if let Some(value) = arg.strip_prefix("--target=") {
+            return Some(value);
         }
+        index += 1;
     }
-    false
+    None
+}
+
+pub fn has_target_arg(args: &[String]) -> bool {
+    extract_target_arg(args).is_some()
+}
+
+pub fn selected_target_id(args: &[String]) -> Option<TargetId> {
+    extract_target_arg(args).and_then(target_id_from_triple)
+}
+
+pub fn selected_target_or_default(args: &[String]) -> TargetId {
+    selected_target_id(args).unwrap_or(default_target_id())
 }
 
 pub fn ensure_target_arg(args: &mut Vec<String>) {
@@ -68,14 +172,17 @@ pub fn ensure_target_arg(args: &mut Vec<String>) {
     }
 
     args.push("--target".to_string());
-    args.push(TARGET_TRIPLE.to_string());
+    args.push(default_target_id().as_triple().to_string());
 }
 
 pub fn has_panic_abort_codegen(args: &[String]) -> bool {
     let mut iter = args.iter().peekable();
     while let Some(arg) = iter.next() {
         if arg == "-C" {
-            if iter.peek().is_some_and(|value| value.as_str() == PANIC_ABORT) {
+            if iter
+                .peek()
+                .is_some_and(|value| value.as_str() == PANIC_ABORT)
+            {
                 return true;
             }
             continue;
@@ -172,8 +279,7 @@ pub fn discover_targets_dir_from_exe(exe: &Path) -> Result<PathBuf> {
     ];
 
     for candidate in candidates {
-        let target_json = candidate.join(TARGET_JSON_FILENAME);
-        if target_json.exists() {
+        if has_supported_target_specs(&candidate) {
             return Ok(candidate);
         }
     }
@@ -181,12 +287,30 @@ pub fn discover_targets_dir_from_exe(exe: &Path) -> Result<PathBuf> {
     bail!(
         "failed to locate targets directory near executable {}; expected {}",
         exe.display(),
-        TARGET_JSON_FILENAME
+        expected_target_spec_list()
     )
 }
 
-pub fn target_json_path(targets_dir: &Path) -> PathBuf {
-    targets_dir.join(TARGET_JSON_FILENAME)
+pub fn has_supported_target_specs(targets_dir: &Path) -> bool {
+    SUPPORTED_TARGETS
+        .iter()
+        .all(|target| targets_dir.join(target.json_filename()).exists())
+}
+
+pub fn expected_target_spec_list() -> String {
+    SUPPORTED_TARGETS
+        .iter()
+        .map(|target| target.json_filename())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+pub fn target_json_path(targets_dir: &Path, target: TargetId) -> PathBuf {
+    targets_dir.join(target.json_filename())
+}
+
+pub fn target_json_path_for_triple(targets_dir: &Path, triple: &str) -> Option<PathBuf> {
+    target_id_from_triple(triple).map(|target| target_json_path(targets_dir, target))
 }
 
 pub fn merged_rust_target_path(targets_dir: &Path, existing: Option<OsString>) -> Result<OsString> {
@@ -198,21 +322,15 @@ pub fn merged_rust_target_path(targets_dir: &Path, existing: Option<OsString>) -
     env::join_paths(paths).context("failed to build merged RUST_TARGET_PATH")
 }
 
-pub fn load_and_validate_target_spec(path: &Path) -> Result<TargetSpecSummary> {
+pub fn load_and_validate_target_spec(
+    path: &Path,
+    expected_target: Option<TargetId>,
+) -> Result<TargetSpecSummary> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read target spec {}", path.display()))?;
     let spec: RawTargetSpec =
         serde_json::from_str(&raw).with_context(|| format!("invalid json: {}", path.display()))?;
 
-    if spec.arch != "x86_64" {
-        bail!("invalid arch {}, expected x86_64", spec.arch);
-    }
-    if !spec.llvm_target.starts_with("x86_64") {
-        bail!(
-            "invalid llvm-target {}, expected x86_64-compatible target",
-            spec.llvm_target
-        );
-    }
     let pointer_width = spec.target_pointer_width.as_string();
     if pointer_width != "64" {
         bail!(
@@ -220,11 +338,43 @@ pub fn load_and_validate_target_spec(path: &Path) -> Result<TargetSpecSummary> {
             pointer_width
         );
     }
-    if spec.target_endian != "little" {
-        bail!("invalid target-endian {}, expected little", spec.target_endian);
+
+    if let Some(target) = expected_target {
+        if spec.arch != target.expected_arch() {
+            bail!(
+                "invalid arch {}, expected {}",
+                spec.arch,
+                target.expected_arch()
+            );
+        }
+        if spec.target_endian != target.expected_endian() {
+            bail!(
+                "invalid target-endian {}, expected {}",
+                spec.target_endian,
+                target.expected_endian()
+            );
+        }
+        if !spec.llvm_target.starts_with(target.expected_llvm_prefix()) {
+            bail!(
+                "invalid llvm-target {}, expected {}-compatible target",
+                spec.llvm_target,
+                target.expected_llvm_prefix()
+            );
+        }
+    } else {
+        if spec.arch.is_empty() {
+            bail!("invalid arch: empty");
+        }
+        if spec.target_endian != "little" && spec.target_endian != "big" {
+            bail!(
+                "invalid target-endian {}, expected little or big",
+                spec.target_endian
+            );
+        }
     }
 
     Ok(TargetSpecSummary {
+        target_id: expected_target,
         arch: spec.arch,
         llvm_target: spec.llvm_target,
         target_endian: spec.target_endian,
@@ -237,8 +387,7 @@ pub fn should_inject_rustc_defaults(args: &[String]) -> bool {
     !args.iter().any(|arg| {
         matches!(
             arg.as_str(),
-            "-V"
-                | "--version"
+            "-V" | "--version"
                 | "-vV"
                 | "-h"
                 | "--help"
@@ -267,9 +416,7 @@ pub fn is_host_side_compilation(args: &[String]) -> bool {
         {
             return true;
         }
-        if args[index] == "--crate-type"
-            && args.get(index + 1).is_some()
-        {
+        if args[index] == "--crate-type" && args.get(index + 1).is_some() {
             total_crate_type_count += 1;
             if args[index + 1] == "proc-macro" {
                 proc_macro_crate_type_count += 1;
@@ -284,7 +431,9 @@ pub fn is_host_side_compilation(args: &[String]) -> bool {
         index += 1;
     }
 
-    !has_print_query && total_crate_type_count > 0 && proc_macro_crate_type_count == total_crate_type_count
+    !has_print_query
+        && total_crate_type_count > 0
+        && proc_macro_crate_type_count == total_crate_type_count
 }
 
 #[cfg(test)]
@@ -293,20 +442,41 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn adds_target_when_missing() {
+    fn adds_default_target_when_missing() {
         let mut args = vec!["rustc".into(), "main.rs".into()];
         ensure_target_arg(&mut args);
         assert!(has_target_arg(&args));
-        assert!(args.windows(2).any(|window| {
-            window[0] == "--target" && window[1] == TARGET_TRIPLE
-        }));
+        assert!(args
+            .windows(2)
+            .any(|window| { window[0] == "--target" && window[1] == TARGET_TRIPLE_X86_64 }));
     }
 
     #[test]
     fn keeps_existing_target() {
-        let mut args = vec!["rustc".into(), "--target=x86_64-custom".into()];
+        let mut args = vec!["rustc".into(), "--target=aarch64-unknown-hxnu".into()];
         ensure_target_arg(&mut args);
         assert_eq!(args.len(), 2);
+        assert_eq!(extract_target_arg(&args), Some(TARGET_TRIPLE_AARCH64));
+    }
+
+    #[test]
+    fn resolves_target_ids() {
+        assert_eq!(
+            target_id_from_triple(TARGET_TRIPLE_X86_64),
+            Some(TargetId::X86_64)
+        );
+        assert_eq!(
+            target_id_from_triple(TARGET_TRIPLE_AARCH64),
+            Some(TargetId::Aarch64)
+        );
+        assert_eq!(
+            target_id_from_triple(TARGET_TRIPLE_POWERPC64LE),
+            Some(TargetId::Powerpc64Le)
+        );
+        assert_eq!(
+            target_id_from_triple(TARGET_TRIPLE_POWERPC64),
+            Some(TargetId::Powerpc64)
+        );
     }
 
     #[test]
@@ -324,23 +494,25 @@ mod tests {
     }
 
     #[test]
-    fn validates_target_spec() {
+    fn validates_target_spec_for_expected_target() {
         let dir = tempdir().expect("tempdir");
-        let path = dir.path().join(TARGET_JSON_FILENAME);
+        let path = dir.path().join(TARGET_JSON_AARCH64);
         std::fs::write(
             &path,
             r#"{
-                "arch": "x86_64",
-                "llvm-target": "x86_64-unknown-none",
+                "arch": "aarch64",
+                "llvm-target": "aarch64-unknown-none-elf",
                 "target-endian": "little",
                 "target-pointer-width": "64"
             }"#,
         )
         .expect("write");
 
-        let summary = load_and_validate_target_spec(&path).expect("valid spec");
-        assert_eq!(summary.arch, "x86_64");
+        let summary =
+            load_and_validate_target_spec(&path, Some(TargetId::Aarch64)).expect("valid spec");
+        assert_eq!(summary.arch, "aarch64");
         assert_eq!(summary.target_pointer_width, "64");
+        assert_eq!(summary.target_id, Some(TargetId::Aarch64));
     }
 
     #[test]

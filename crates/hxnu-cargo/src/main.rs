@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use hxnu_target_spec::{
-    discover_targets_dir_from_exe, ensure_build_std_flag, ensure_target_arg, merged_rust_target_path,
-    PANIC_ABORT,
+    discover_targets_dir_from_exe, ensure_build_std_flag, ensure_target_arg,
+    merged_rust_target_path, PANIC_ABORT,
 };
 use std::env;
 use std::ffi::OsString;
@@ -23,7 +23,8 @@ fn run() -> Result<()> {
     let cargo_bin = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let hxnu_rustc = discover_hxnu_rustc_path(&current_exe)?;
     let targets_dir = discover_targets_dir_from_exe(&current_exe)?;
-    let merged_target_path = merged_rust_target_path(&targets_dir, env::var_os("RUST_TARGET_PATH"))?;
+    let merged_target_path =
+        merged_rust_target_path(&targets_dir, env::var_os("RUST_TARGET_PATH"))?;
     let merged_rustflags = merged_rustflags(env::var("RUSTFLAGS").ok());
 
     let status = Command::new(&cargo_bin)
@@ -78,7 +79,9 @@ fn should_inject_build_std(args: &[String]) -> bool {
 }
 
 fn compile_subcommand(args: &[String]) -> Option<&str> {
-    let compile_commands = ["build", "check", "clippy", "doc", "run", "rustc", "test", "bench"];
+    let compile_commands = [
+        "build", "check", "clippy", "doc", "run", "rustc", "test", "bench",
+    ];
     parse_subcommand(args).and_then(|command| {
         if compile_commands.contains(&command) {
             Some(command)
@@ -137,13 +140,21 @@ mod tests {
         let args = vec!["build".to_string()];
         let planned = prepare_cargo_args(&args);
 
-        assert!(planned.windows(2).any(|w| w[0] == "--target" && w[1] == TARGET_TRIPLE));
-        assert!(planned.iter().any(|arg| arg == "build-std=core,alloc,compiler_builtins"));
+        assert!(planned
+            .windows(2)
+            .any(|w| w[0] == "--target" && w[1] == TARGET_TRIPLE));
+        assert!(planned
+            .iter()
+            .any(|arg| arg == "build-std=core,alloc,compiler_builtins"));
     }
 
     #[test]
     fn metadata_subcommand_keeps_args() {
-        let args = vec!["metadata".to_string(), "--format-version".to_string(), "1".to_string()];
+        let args = vec![
+            "metadata".to_string(),
+            "--format-version".to_string(),
+            "1".to_string(),
+        ];
         let planned = prepare_cargo_args(&args);
         assert_eq!(planned, args);
     }

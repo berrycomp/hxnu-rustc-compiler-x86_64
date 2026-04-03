@@ -1,0 +1,27 @@
+{
+  "arch": "powerpc64",
+  "abi": "elfv2",
+  "code-model": "small",
+  "cpu": "ppc64",
+  "data-layout": "E-m:e-Fn32-i64:64-i128:128-n32:64",
+  "disable-redzone": true,
+  "linker-flavor": "gnu-lld",
+  "linker": "rust-lld",
+  "llvm-abiname": "elfv2",
+  "llvm-target": "powerpc64-unknown-none-elf",
+  "max-atomic-width": 64,
+  "metadata": {
+    "description": "HXNU powerpc64 (big-endian) freestanding target"
+  },
+  "panic-strategy": "abort",
+  "plt-by-default": false,
+  "position-independent-executables": true,
+  "stack-probes": {
+    "kind": "inline"
+  },
+  "static-position-independent-executables": true,
+  "relro-level": "full",
+  "target-endian": "big",
+  "target-pointer-width": 64,
+  "vendor": "hxnu"
+}

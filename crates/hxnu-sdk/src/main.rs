@@ -3,7 +3,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use hxnu_target_spec::{
-    merged_rust_target_path, target_json_path, BUILD_STD_COMPONENTS, PANIC_ABORT, TARGET_TRIPLE,
+    default_target_id, merged_rust_target_path, supported_targets, target_json_path, TargetId,
+    BUILD_STD_COMPONENTS, PANIC_ABORT,
 };
 use std::env;
 use std::fs;
@@ -145,8 +146,9 @@ fn build_bundle(workspace_root: &Path, args: &BundleBuildArgs) -> Result<PathBuf
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
     let bundle_dir = out_dir.join(format!("{BUNDLE_NAME}-{version}"));
     if bundle_dir.exists() {
-        fs::remove_dir_all(&bundle_dir)
-            .with_context(|| format!("failed to clean bundle directory {}", bundle_dir.display()))?;
+        fs::remove_dir_all(&bundle_dir).with_context(|| {
+            format!("failed to clean bundle directory {}", bundle_dir.display())
+        })?;
     }
 
     let profile_dir = match args.profile {
@@ -158,39 +160,57 @@ fn build_bundle(workspace_root: &Path, args: &BundleBuildArgs) -> Result<PathBuf
 
     let bin_dir = bundle_dir.join("bin");
     let targets_dir = bundle_dir.join("targets");
-    let sysroot_dir = bundle_dir.join("sysroot/lib/rustlib").join(TARGET_TRIPLE).join("lib");
+    let sysroot_dir = bundle_dir.join("sysroot/lib/rustlib");
     let docs_dir = bundle_dir.join("docs");
     let examples_dir = bundle_dir.join("examples");
 
-    for dir in [&bin_dir, &targets_dir, &sysroot_dir, &docs_dir, &examples_dir] {
+    for dir in [
+        &bin_dir,
+        &targets_dir,
+        &sysroot_dir,
+        &docs_dir,
+        &examples_dir,
+    ] {
         fs::create_dir_all(dir)
             .with_context(|| format!("failed to create bundle directory {}", dir.display()))?;
     }
 
     copy_file(
-        &workspace_root.join("target").join(profile_dir).join("hxnu-rustc"),
+        &workspace_root
+            .join("target")
+            .join(profile_dir)
+            .join("hxnu-rustc"),
         &bin_dir.join("hxnu-rustc"),
     )?;
     copy_file(
-        &workspace_root.join("target").join(profile_dir).join("hxnu-cargo"),
+        &workspace_root
+            .join("target")
+            .join(profile_dir)
+            .join("hxnu-cargo"),
         &bin_dir.join("hxnu-cargo"),
     )?;
-    copy_file(
-        &target_json_path(&workspace_root.join("targets")),
-        &targets_dir.join(hxnu_target_spec::TARGET_JSON_FILENAME),
-    )?;
+    for target in supported_targets() {
+        copy_file(
+            &target_json_path(&workspace_root.join("targets"), *target),
+            &targets_dir.join(target.json_filename()),
+        )?;
+    }
 
     copy_directory(&workspace_root.join("docs"), &docs_dir)?;
     copy_directory(&workspace_root.join("examples"), &examples_dir)?;
 
+    let target_list = supported_targets()
+        .iter()
+        .map(|target| target.as_triple())
+        .collect::<Vec<_>>()
+        .join(",");
+    let manifest_body = format!(
+        "name={BUNDLE_NAME}\nversion={version}\ndefault-target={}\nprofile={profile_dir}\ntargets={target_list}\n",
+        default_target_id().as_triple(),
+    );
     let manifest = bundle_dir.join("SDK-MANIFEST.txt");
-    fs::write(
-        &manifest,
-        format!(
-            "name={BUNDLE_NAME}\nversion={version}\ntarget={TARGET_TRIPLE}\nprofile={profile_dir}\n"
-        ),
-    )
-    .with_context(|| format!("failed to write manifest {}", manifest.display()))?;
+    fs::write(&manifest, manifest_body)
+        .with_context(|| format!("failed to write manifest {}", manifest.display()))?;
 
     build_prebuilt_sysroot(workspace_root, profile_dir, &sysroot_dir)?;
     Ok(bundle_dir)
@@ -210,44 +230,80 @@ fn run_workspace_build(workspace_root: &Path, profile: BuildProfile) -> Result<(
         command.arg("--release");
     }
 
-    let status = command.status().context("failed to run cargo build for SDK binaries")?;
+    let status = command
+        .status()
+        .context("failed to run cargo build for SDK binaries")?;
     if !status.success() {
         bail!("cargo build for SDK binaries failed");
     }
     Ok(())
 }
 
-fn build_prebuilt_sysroot(workspace_root: &Path, profile_dir: &str, out_lib_dir: &Path) -> Result<()> {
-    let hxnu_rustc = workspace_root.join("target").join(profile_dir).join("hxnu-rustc");
+fn build_prebuilt_sysroot(
+    workspace_root: &Path,
+    profile_dir: &str,
+    out_rustlib_dir: &Path,
+) -> Result<()> {
+    let hxnu_rustc = workspace_root
+        .join("target")
+        .join(profile_dir)
+        .join("hxnu-rustc");
     let targets_dir = workspace_root.join("targets");
-    let merged_target_path = merged_rust_target_path(&targets_dir, env::var_os("RUST_TARGET_PATH"))?;
+    let merged_target_path =
+        merged_rust_target_path(&targets_dir, env::var_os("RUST_TARGET_PATH"))?;
     let target_dir = workspace_root.join("target/sdk-sysroot");
     fs::create_dir_all(&target_dir)?;
 
+    for target in supported_targets() {
+        build_prebuilt_sysroot_for_target(
+            workspace_root,
+            &hxnu_rustc,
+            &merged_target_path,
+            &target_dir,
+            out_rustlib_dir,
+            *target,
+        )?;
+    }
+    Ok(())
+}
+
+fn build_prebuilt_sysroot_for_target(
+    workspace_root: &Path,
+    hxnu_rustc: &Path,
+    merged_target_path: &std::ffi::OsStr,
+    target_dir: &Path,
+    out_rustlib_dir: &Path,
+    target: TargetId,
+) -> Result<()> {
+    let target_triple = target.as_triple();
     let status = Command::new("cargo")
         .arg("build")
         .arg("--manifest-path")
         .arg(workspace_root.join("examples/no_std-hello/Cargo.toml"))
         .arg("--target")
-        .arg(TARGET_TRIPLE)
+        .arg(target_triple)
         .arg("--release")
         .arg("-Z")
         .arg(format!("build-std={BUILD_STD_COMPONENTS}"))
-        .env("RUSTC", &hxnu_rustc)
+        .env("RUSTC", hxnu_rustc)
         .env("RUST_TARGET_PATH", merged_target_path)
         .env("RUSTFLAGS", format!("-C {PANIC_ABORT}"))
-        .env("CARGO_TARGET_DIR", &target_dir)
+        .env("CARGO_TARGET_DIR", target_dir)
         .status()
-        .context("failed to run cargo build for sysroot prebuild")?;
+        .with_context(|| {
+            format!("failed to run cargo build for sysroot prebuild ({target_triple})")
+        })?;
 
     if !status.success() {
-        bail!("sysroot prebuild failed");
+        bail!("sysroot prebuild failed for {}", target_triple);
     }
 
-    let deps_dir = target_dir.join(TARGET_TRIPLE).join("release/deps");
-    copy_matching_lib(&deps_dir, out_lib_dir, "libcore-")?;
-    copy_matching_lib(&deps_dir, out_lib_dir, "liballoc-")?;
-    copy_matching_lib(&deps_dir, out_lib_dir, "libcompiler_builtins-")?;
+    let deps_dir = target_dir.join(target_triple).join("release/deps");
+    let out_lib_dir = out_rustlib_dir.join(target_triple).join("lib");
+    fs::create_dir_all(&out_lib_dir)?;
+    copy_matching_lib(&deps_dir, &out_lib_dir, "libcore-")?;
+    copy_matching_lib(&deps_dir, &out_lib_dir, "liballoc-")?;
+    copy_matching_lib(&deps_dir, &out_lib_dir, "libcompiler_builtins-")?;
     Ok(())
 }
 
@@ -271,7 +327,10 @@ fn copy_matching_lib(src_dir: &Path, out_dir: &Path, prefix: &str) -> Result<()>
     }
 
     if !copied {
-        bail!("failed to locate {prefix} artifacts in {}", src_dir.display());
+        bail!(
+            "failed to locate {prefix} artifacts in {}",
+            src_dir.display()
+        );
     }
     Ok(())
 }
@@ -289,15 +348,13 @@ fn pack_bundle(workspace_root: &Path, args: &BundlePackArgs) -> Result<PathBuf> 
     }
 
     let output = args.output.clone().unwrap_or_else(|| {
-        workspace_root
-            .join("build")
-            .join(format!(
-                "{}.tar.gz",
-                bundle_dir
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(BUNDLE_NAME)
-            ))
+        workspace_root.join("build").join(format!(
+            "{}.tar.gz",
+            bundle_dir
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(BUNDLE_NAME)
+        ))
     });
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
@@ -313,7 +370,9 @@ fn pack_bundle(workspace_root: &Path, args: &BundlePackArgs) -> Result<PathBuf> 
     tar.append_dir_all(name, &bundle_dir)
         .with_context(|| format!("failed to archive {}", bundle_dir.display()))?;
     let encoder = tar.into_inner().context("failed to finalize tar archive")?;
-    encoder.finish().context("failed to finalize gzip archive")?;
+    encoder
+        .finish()
+        .context("failed to finalize gzip archive")?;
 
     Ok(output)
 }
@@ -366,6 +425,7 @@ fn copy_file(src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(src, dst).with_context(|| format!("failed to copy {} -> {}", src.display(), dst.display()))?;
+    fs::copy(src, dst)
+        .with_context(|| format!("failed to copy {} -> {}", src.display(), dst.display()))?;
     Ok(())
 }
